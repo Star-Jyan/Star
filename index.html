@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>逆水寒帮战人员管理系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: "Microsoft Yahei", system-ui
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 30px auto;
+            padding: 0 15px
+        }
+
+        .login-wrap {
+            max-width: 420px;
+            margin: 120px auto;
+            border: 1px solid #ddd;
+            padding: 30px;
+            border-radius: 8px
+        }
+
+        .operate-area {
+            padding: 12px;
+            border: 1px solid #eee;
+            margin-bottom: 15px;
+            border-radius: 6px
+        }
+
+        .stat-area {
+            background: #f0f7ff;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px
+        }
+
+        input,
+        select {
+            padding: 7px;
+            margin: 4px;
+            font-size: 14px;
+            width: 140px
+        }
+
+        button {
+            padding: 7px 14px;
+            background: #3671d9;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer
+        }
+
+        button.del {
+            background: #dd3333
+        }
+
+        button.sign {
+            background: #239956
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse
+        }
+
+        th,
+        td {
+            border: 1px solid #cccccc;
+            padding: 9px;
+            text-align: center
+        }
+
+        th {
+            background: #f5f7fa
+        }
+
+        .hidden {
+            display: none
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- 登录面板 -->
+        <div id="loginBox" class="login-wrap">
+            <h2>帮会管理员登录</h2>
+            <div>
+                <p>账号：<input id="username" placeholder="输入账号"></p>
+                <p>密码：<input id="password" type="password" placeholder="输入密码"></p>
+                <button onclick="loginSubmit()">登录系统</button>
+            </div>
+        </div>
+
+        <!-- 主管理面板 -->
+        <div id="mainBox" class="hidden">
+            <h2>逆水寒帮战人员管理系统（出勤统计版）</h2>
+
+            <div class="stat-area">
+                <h3>本周出勤统计</h3>
+                <div id="statResult">加载中...</div>
+                <button onclick="loadWeekStat()">刷新统计</button>
+            </div>
+
+            <div class="operate-area">
+                <input id="roleName" placeholder="角色名">
+                <input id="job" placeholder="职业">
+                <input id="position" placeholder="定位">
+                <input id="combat" type="number" placeholder="战力">
+                <input id="groupNo" placeholder="分组">
+                <select id="status">
+                    <option value="出战">出战</option>
+                    <option value="替补">替补</option>
+                    <option value="缺席">缺席</option>
+                </select>
+                <input id="remark" placeholder="备注">
+                <button onclick="addMember()">新增成员</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>角色名</th>
+                        <th>职业</th>
+                        <th>定位</th>
+                        <th>战力</th>
+                        <th>分组</th>
+                        <th>状态</th>
+                        <th>本周出勤</th>
+                        <th>备注</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // =====================【这里修改为你自己的信息！！】=====================
+        const SUPABASE_URL = "https://zvqcwezubwfxzouykbla.supabase.co";
+        const SUPABASE_ANON_KEY = "sb_publishable_L-uStDr6N6-1lD8icW4ATA_fbZ7n1YR";
+        // =====================================================================
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let memberAttendMap = {}; // 保存本周出勤次数 key:成员id
+
+        // 获取当前日期属于第几周、年份
+        function getWeekInfo() {
+            const now = new Date();
+            const startOfYear = new Date(now.getFullYear(), 0, 1);
+            const diff = now - startOfYear;
+            const oneWeek = 7 * 24 * 3600 * 1000;
+            const weekNum = Math.floor(diff / oneWeek) + 1;
+            return {
+                year: now.getFullYear(),
+                week: weekNum,
+                today: now.toISOString().split('T')[0]
+            }
+        }
+
+        // 登录
+        async function loginSubmit() {
+            const name = document.getElementById("username").value;
+            const pwd = document.getElementById("password").value;
+            const { data } = await supabase.from("admin_user")
+                .select("*")
+                .eq("username", name)
+                .eq("password", pwd);
+            if (data.length > 0) {
+                alert("登录成功");
+                document.getElementById("loginBox").classList.add("hidden");
+                document.getElementById("mainBox").classList.remove("hidden");
+                await loadWeekStat();
+                await loadMemberList();
+            } else {
+                alert("账号或密码错误！");
+            }
+        }
+
+        // 加载本周出勤统计
+        async function loadWeekStat() {
+            const { year, week } = getWeekInfo();
+            const { data } = await supabase
+                .from("member_attendance")
+                .select("member_id")
+                .eq("year", year)
+                .eq("week_num", week);
+
+            memberAttendMap = {};
+            data.forEach(item => {
+                if (!memberAttendMap[item.member_id]) memberAttendMap[item.member_id] = 0;
+                memberAttendMap[item.member_id] += 1;
+            })
+            document.getElementById("statResult").innerText = `当前：${year}年第${week}周，已记录${data.length}条出勤`;
+            loadMemberList();
+        }
+
+        // 成员签到（记录今日出勤）
+        async function signAttend(memberId) {
+            const { year, week, today } = getWeekInfo();
+            // 判断今天是否已经签到
+            const { data } = await supabase.from("member_attendance")
+                .select("id")
+                .eq("member_id", memberId)
+                .eq("attend_date", today);
+            if (data.length > 0) {
+                alert("今日已经签到！");
+                return;
+            }
+            await supabase.from("member_attendance").insert([{
+                member_id: memberId,
+                attend_date: today,
+                week_num: week,
+                year: year
+            }])
+            alert("签到成功！");
+            loadWeekStat();
+        }
+
+        // 加载全部成员
+        async function loadMemberList() {
+            const { data } = await supabase
+                .from("gang_member")
+                .select("*")
+                .order("group_no");
+            let html = "";
+            data.forEach(item => {
+                const count = memberAttendMap[item.id] || 0;
+                html += `
+        <tr>
+            <td>${item.role_name}</td>
+            <td>${item.job}</td>
+            <td>${item.position}</td>
+            <td>${item.combat}</td>
+            <td>${item.group_no}</td>
+            <td>${item.status}</td>
+            <td>${count}次</td>
+            <td>${item.remark || ""}</td>
+            <td>
+                <button class="sign" onclick="signAttend(${item.id})">今日签到</button>
+                <button class="del" onclick="deleteMember(${item.id})">删除</button>
+            </td>
+        </tr>`
+            })
+            document.getElementById("tableBody").innerHTML = html;
+        }
+
+        //新增成员
+        async function addMember() {
+            const memberData = {
+                role_name: document.getElementById("roleName").value,
+                job: document.getElementById("job").value,
+                position: document.getElementById("position").value,
+                combat: Number(document.getElementById("combat").value),
+                group_no: document.getElementById("groupNo").value,
+                status: document.getElementById("status").value,
+                remark: document.getElementById("remark").value
+            }
+            await supabase.from("gang_member").insert([memberData]);
+            loadMemberList();
+            alert("新增完成！");
+        }
+
+        //删除成员
+        async function deleteMember(id) {
+            if (!confirm("确认删除该成员？出勤记录一并清除！")) return;
+            await supabase.from("gang_member").delete().eq("id", id);
+            loadWeekStat();
+        }
+    </script>
+</body>
+
+</html>
